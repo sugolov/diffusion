@@ -1,2 +1,2 @@
-# diffusion
-training and understanding diffusion models
+# Diffusion
+Training and understanding diffusion models
