@@ -13,7 +13,7 @@ def test_cifar10_load():
 
     print(image.shape)
     im = Image.fromarray(image)
-    im.save("../test/out/cifar10_test.jpg")
+    im.save("test/out/cifar10_test.jpg")
 
 
 
