@@ -29,7 +29,7 @@ class DDPM(nn.Module):
 
         self.prod_alphas = torch.cumprod(self.alphas, dim=0)
 
-        self.noisenet = None
+        self.noisenet = UNetCIFAR10()
 
     ## TODO: think about how to intelligently implement sampling and training
     def forward(self):
@@ -106,6 +106,8 @@ class UNetCIFAR10(nn.Module):
         x2 = self.enc2(self.maxpool(x1))    # 32x16x16
         x3 = self.enc3(self.maxpool(x2))    # 64x8x8
 
+        xmid = self.maxpool(x3)
+
         # middle convolution (bottom of U)
         x3d = self.midconv(self.maxpool(x3))
 
@@ -127,4 +129,4 @@ if __name__ == "__main__":
     tensor = torch.randn((3, 32, 32))
     unet = UNetCIFAR10()
     s = unet(tensor)
-    print(s)
+    print(s.shape)
