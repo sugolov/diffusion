@@ -65,53 +65,66 @@ class UNetEncLayer(nn.Module):
 
 
 class UNetCIFAR10(nn.Module):
+    """
+    Hardcoded with CIFAR10 dimensions and fixed padding
+
+    TODO: add residual connections
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
         self.maxpool = MaxPool2d(kernel_size=2)
 
+        # encoding convolutions
         self.enc1 = UNetConvLayer(3, 16)     # 16x16x16
         self.enc2 = UNetConvLayer(16, 32)    # 32x8x8
         self.enc3 = UNetConvLayer(32, 64)   # 64x4x4
 
-        self.upconv3 = ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=2, stride=2)
-        self.dec3 = UNetConvLayer(64, 32)
+        # middle convolution
+        self.midconv = UNetConvLayer(64, 128)
 
-        self.upconv2 = ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=2, stride=2)
-        self.dec2 = UNetConvLayer(32, 16)
+        # decoder up convolutions
+        self.upconv3 = ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=2, stride=2)
+        self.dec3 = UNetConvLayer(128, 64)
 
-        self.upconv1 = ConvTranspose2d(in_channels=16, out_channels=8, kernel_size=2, stride=2)
-        self.dec1 = UNetConvLayer(16, 8)
+        self.upconv2 = ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=2, stride=2)
+        self.dec2 = UNetConvLayer(64, 32)
 
-        self.outconv = Conv2d(in_channels=8, out_channels=3, kernel_size=1)
+        self.upconv1 = ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=2, stride=2)
+        self.dec1 = UNetConvLayer(32, 16)
+
+        self.outconv = UNetConvLayer(16, 8)
+
+        self.outlayer = Conv2d(in_channels=8, out_channels=3, kernel_size=1)
+
 
     def forward(self, x):
 
-        # 16x16x16
-        x1 = self.maxpool(self.enc1(x))
-        print(x1.shape)
-        # 32x8x8
-        x2 = self.maxpool(self.enc2(x1))
-        print(x2.shape)
-        # 64x4x4
-        x3 = self.maxpool(self.enc3(x2))
-        print(x3.shape)
+        # encoding steps
+        x1 = self.enc1(x)       # 16x32x32
+        x2 = self.enc2(self.maxpool(x1))    # 32x16x16
+        x3 = self.enc3(self.maxpool(x2))    # 64x8x8
 
-        # stack x2 on up-convolution of x3
-        x2d = self.upconv3(x3)
+        # middle convolution (bottom of U)
+        x3d = self.midconv(self.maxpool(x3))
 
-        x1d = self.dec3(torch.cat((x2, x2d), dim=0))
-        #x1d = self.dec2(torch.stack(x1, self.upconv2(x2d)))
-        #out = self.dec1(torch.stack(x1, self.upconv2(x2d)))
-
-
-
-
-
+        # decoding steps
+        x2d = self.dec3(
+            torch.cat((x3, self.upconv3(x3d)), dim=0)
+        )
+        x1d = self.dec2(
+            torch.cat((x2, self.upconv2(x2d)), dim=0)
+        )
+        xout = self.dec1(
+            torch.cat((x1, self.upconv1(x1d)), dim=0)
+        )
+        return self.outlayer(self.outconv(xout))
 
 if __name__ == "__main__":
     # test_cifar10_load()
     # test_conv_shapes()
-    tensor = torch.randn((3,32,32))
+    tensor = torch.randn((3, 32, 32))
     unet = UNetCIFAR10()
-    unet(tensor)
+    s = unet(tensor)
+    print(s)
