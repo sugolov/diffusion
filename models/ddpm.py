@@ -29,9 +29,8 @@ class DDPM(nn.Module):
 
         self.prod_alphas = torch.cumprod(self.alphas, dim=0)
 
-        self.noisenet = UNetCIFAR10()
+        self.noisenet = ResUNetCIFAR10()
 
-    ## TODO: think about how to intelligently implement sampling and training
     def forward(self):
         pass
 
@@ -39,7 +38,6 @@ class DDPM(nn.Module):
         pass
 
 
-# TODO: implement a U-Net here, preferrably without diffusers.UNet
 
 class UNetConvLayer(nn.Module):
 
@@ -51,23 +49,25 @@ class UNetConvLayer(nn.Module):
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
-        self.conv1 = Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-        self.conv2 = Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding)
+
+        self.conv1 = Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=padding
+        )
+
+        self.conv2 = Conv2d(
+            out_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=padding
+        )
 
     def forward(self, x):
-        x1 = ReLU()(self.conv1(x))
-        x2 = ReLU()(self.conv2(x1))
-        return x2
-
-class UNetEncLayer(nn.Module):
-
-    def __init__(self, in_channels, out_channels, kernel_size=2, padding="same", *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.conv = UNetConvLayer(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-        self.pool = MaxPool2d(kernel_size=kernel_size)
-
-    def forward(self, x):
-        return self.pool(self.conv(x))
+        x = ReLU()(self.conv1(x))
+        x = ReLU()(self.conv2(x))
+        return x
 
 class UNetDecLayer(nn.Module):
 
@@ -82,7 +82,7 @@ class UNetDecLayer(nn.Module):
         super().__init__(*args, **kwargs)
 
         self.conv = UNetConvLayer(
-            in_channels,
+            out_channels,
             out_channels,
             kernel_size=kernel_size,
             padding=padding
@@ -100,14 +100,14 @@ class UNetDecLayer(nn.Module):
             padding=padding
         )
 
-    def forward(self, x_res, x):
+    def forward(self, x, x_res):
         x = self.upconv(x)
         x = x + self.res_conv(x_res)
         x = self.conv(x)
         return x
 
 
-class UNetCIFAR10(nn.Module):
+class ResUNetCIFAR10(nn.Module):
     """
     Hardcoded with CIFAR10 dimensions and fixed padding
 
@@ -128,19 +128,14 @@ class UNetCIFAR10(nn.Module):
         self.midconv = UNetConvLayer(64, 128)
 
         # decoder up convolutions
-        self.upconv3 = ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=2, stride=2)
-        self.dec3 = UNetConvLayer(128, 64)
+        # residual has `out_channels` channels
+        self.dec3 = UNetDecLayer(128, 64)
+        self.dec2 = UNetDecLayer(64, 32)
+        self.dec1 = UNetDecLayer(32, 16)
 
-        self.upconv2 = ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=2, stride=2)
-        self.dec2 = UNetConvLayer(64, 32)
-
-        self.upconv1 = ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=2, stride=2)
-        self.dec1 = UNetConvLayer(32, 16)
-
+        # out layers
         self.outconv = UNetConvLayer(16, 8)
-
         self.outlayer = Conv2d(in_channels=8, out_channels=3, kernel_size=1)
-
 
     def forward(self, x):
 
@@ -149,25 +144,19 @@ class UNetCIFAR10(nn.Module):
         x2 = self.enc2(self.maxpool(x1))    # 32x16x16
         x3 = self.enc3(self.maxpool(x2))    # 64x8x8
 
-        # middle convolution (bottom of U)
+        # middle convolution
         x3d = self.midconv(self.maxpool(x3))
 
         # decoding steps
-        x2d = self.dec3(
-            torch.cat((x3, self.upconv3(x3d)), dim=0)
-        )
-        x1d = self.dec2(
-            torch.cat((x2, self.upconv2(x2d)), dim=0)
-        )
-        xout = self.dec1(
-            torch.cat((x1, self.upconv1(x1d)), dim=0)
-        )
+
+        x2d = self.dec3(x3d, x3)
+        x1d = self.dec2(x2d, x2)
+        xout = self.dec1(x1d, x1)
+
         return self.outlayer(self.outconv(xout))
 
 if __name__ == "__main__":
-    # test_cifar10_load()
-    # test_conv_shapes()
     tensor = torch.randn((3, 32, 32))
-    unet = UNetCIFAR10()
+    unet = ResUNetCIFAR10()
     s = unet(tensor)
     print(s.shape)
