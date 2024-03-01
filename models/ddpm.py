@@ -8,37 +8,6 @@ from diffusers import UNet2DModel
 
 from test.test_ddpm import *
 
-
-class DDPM(nn.Module):
-    """
-    dim:        dimension of images
-    n_steps:    number of diffusion steps
-    """
-
-    def __init__(self, dim=(32, 32), n_steps=1000, noise_schedule=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.dim = dim
-        self.n_steps = n_steps
-
-        if noise_schedule is not None:
-            self.noise_schedule = self.noise_schedule
-        else:
-            self.noise_schedule = torch.linspace(1e-4, 2e-2, self.n_steps)
-
-        self.alphas = 1 - self.noise_schedule
-
-        self.prod_alphas = torch.cumprod(self.alphas, dim=0)
-
-        self.noisenet = ResUNetCIFAR10()
-
-    def forward(self):
-        pass
-
-    def sample(self):
-        pass
-
-
-
 class UNetConvLayer(nn.Module):
 
     def __init__(self,
@@ -46,9 +15,20 @@ class UNetConvLayer(nn.Module):
                  out_channels,
                  kernel_size=2,
                  padding="same",
+                 num_groups=4,
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.gn1 = nn.GroupNorm(
+            num_groups=num_groups,
+            num_channels=out_channels
+        )
+
+        self.gn2 = nn.GroupNorm(
+            num_groups=num_groups,
+            num_channels=out_channels
+        )
 
         self.conv1 = Conv2d(
             in_channels,
@@ -66,7 +46,9 @@ class UNetConvLayer(nn.Module):
 
     def forward(self, x):
         x = ReLU()(self.conv1(x))
+        x = self.gn1(x)
         x = ReLU()(self.conv2(x))
+        x = self.gn2(x)
         return x
 
 class UNetDecLayer(nn.Module):
@@ -76,6 +58,7 @@ class UNetDecLayer(nn.Module):
                  out_channels,
                  kernel_size=2,
                  padding="same",
+                 num_groups=4,
                  *args,
                  **kwargs
                  ):
@@ -85,12 +68,23 @@ class UNetDecLayer(nn.Module):
             out_channels,
             out_channels,
             kernel_size=kernel_size,
-            padding=padding
+            padding=padding,
+            num_groups=num_groups
+        )
+
+        self.gn_up = nn.GroupNorm(
+            num_groups=num_groups,
+            num_channels=out_channels
         )
 
         self.upconv = ConvTranspose2d(
             in_channels=in_channels,
             out_channels=out_channels, kernel_size=2, stride=2
+        )
+
+        self.gn_res = nn.GroupNorm(
+            num_groups=num_groups,
+            num_channels=out_channels
         )
 
         self.res_conv = Conv2d(
@@ -102,8 +96,10 @@ class UNetDecLayer(nn.Module):
 
     def forward(self, x, x_res):
         x = self.upconv(x)
+        x = self.gn_up(x)
         x = x + self.res_conv(x_res)
         x = self.conv(x)
+        x = self.gn_res(x)
         return x
 
 
@@ -137,7 +133,7 @@ class ResUNetCIFAR10(nn.Module):
         self.outconv = UNetConvLayer(16, 8)
         self.outlayer = Conv2d(in_channels=8, out_channels=3, kernel_size=1)
 
-    def forward(self, x):
+    def forward(self, x, t):
 
         # encoding steps
         x1 = self.enc1(x)       # 16x32x32
@@ -155,8 +151,47 @@ class ResUNetCIFAR10(nn.Module):
 
         return self.outlayer(self.outconv(xout))
 
+    def positional_encoding(self, t, dim=256, n=1e5):
+        enc = torch.zeros(dim)
+        enc[2 * torch.arange(dim/2, dtype=torch.int64)] = torch.sin(t / n**(torch.arange(dim/2)/dim))
+        enc[1 + 2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.cos(t / n ** (torch.arange(dim / 2) / dim))
+        return enc
+
+class DDPM(nn.Module):
+    """
+    dim:        dimension of images
+    n_steps:    number of diffusion steps
+    """
+
+    def __init__(self,
+                 dim=(3, 32, 32),
+                 n_steps=1000,
+                 noise_schedule=None,
+                 *args,
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.dim = dim
+
+        self.n_steps = n_steps
+
+        if noise_schedule is not None:
+            self.noise_schedule = self.noise_schedule
+        else:
+            self.noise_schedule = torch.linspace(1e-4, 2e-2, self.n_steps)
+
+        self.alphas = 1 - self.noise_schedule
+
+        self.prod_alphas = torch.cumprod(self.alphas, dim=0)
+
+        self.noisenet = ResUNetCIFAR10()
+
+    def forward(self):
+        pass
+
 if __name__ == "__main__":
     tensor = torch.randn((3, 32, 32))
     unet = ResUNetCIFAR10()
-    s = unet(tensor)
-    print(s.shape)
+    #s = unet(tensor)
+    #print(s.shape)
+    unet.positional_encoding(5)
