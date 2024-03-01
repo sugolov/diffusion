@@ -43,7 +43,13 @@ class DDPM(nn.Module):
 
 class UNetConvLayer(nn.Module):
 
-    def __init__(self, in_channels, out_channels, kernel_size=2, padding="same", *args, **kwargs):
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size=2,
+                 padding="same",
+                 *args,
+                 **kwargs):
         super().__init__(*args, **kwargs)
         self.conv1 = Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
         self.conv2 = Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding)
@@ -62,6 +68,43 @@ class UNetEncLayer(nn.Module):
 
     def forward(self, x):
         return self.pool(self.conv(x))
+
+class UNetDecLayer(nn.Module):
+
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_size=2,
+                 padding="same",
+                 *args,
+                 **kwargs
+                 ):
+        super().__init__(*args, **kwargs)
+
+        self.conv = UNetConvLayer(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            padding=padding
+        )
+
+        self.upconv = ConvTranspose2d(
+            in_channels=in_channels,
+            out_channels=out_channels, kernel_size=2, stride=2
+        )
+
+        self.res_conv = Conv2d(
+            in_channels=out_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            padding=padding
+        )
+
+    def forward(self, x_res, x):
+        x = self.upconv(x)
+        x = x + self.res_conv(x_res)
+        x = self.conv(x)
+        return x
 
 
 class UNetCIFAR10(nn.Module):
@@ -105,8 +148,6 @@ class UNetCIFAR10(nn.Module):
         x1 = self.enc1(x)       # 16x32x32
         x2 = self.enc2(self.maxpool(x1))    # 32x16x16
         x3 = self.enc3(self.maxpool(x2))    # 64x8x8
-
-        xmid = self.maxpool(x3)
 
         # middle convolution (bottom of U)
         x3d = self.midconv(self.maxpool(x3))
