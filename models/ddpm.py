@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import Conv2d, ConvTranspose2d, MaxPool2d, ReLU, Linear
+from torch.nn.parameter import Parameter
 
 import diffusers
 from diffusers import UNet2DModel
@@ -136,28 +137,28 @@ class ResUNetCIFAR10(nn.Module):
         self.outlayer = Conv2d(in_channels=8, out_channels=3, kernel_size=1)
 
         # position net
-        self.position_net = nn.Sequential(
-            Linear(1024, 2048),
-            ReLU(),
-            Linear(2048, 4096),
-            ReLU(),
-            Linear(4096, 4096),
-            ReLU(),
-            Linear(4096, 2048),
-            ReLU(),
-            Linear(2048, 1024),
-            ReLU(),
-            Linear(1024, 1024)
-        )
+        # self.position_net = nn.Sequential(
+        #    Linear(1024, 2048),
+        #    ReLU(),
+        #    Linear(2048, 4096),
+        #    ReLU(),
+        #    Linear(4096, 4096),
+        #    ReLU(),
+        #    Linear(4096, 2048),
+        #    ReLU(),
+        #    Linear(2048, 1024),
+        #    ReLU(),
+        #    Linear(1024, 1024)
+        #)
 
 
     def forward(self, x, t):
 
         # position embedding
-        t_emb = self.position_net(
-            self.positional_encoding(t)
-        )
-        t_emb.reshape((32, 32))
+        #t_emb = self.position_net(
+        #    self.positional_encoding(t)
+        #)
+        #t_emb.reshape((32, 32))
 
         # encoding steps
         x1 = self.enc1(x)       # 16x32x32
@@ -176,19 +177,13 @@ class ResUNetCIFAR10(nn.Module):
 
     def positional_encoding(self, t, dim=1024, n=1e5):
         enc = torch.zeros(dim)
-
         # sine indices
         enc[2 * torch.arange(dim/2, dtype=torch.int64)] = torch.sin(t / n**(torch.arange(dim/2)/dim))
-
         # cosine indices
         enc[1 + 2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.cos(t / n ** (torch.arange(dim / 2) / dim))
-
         return enc
 
-## TODO: add attention
-## TODO: positional MLP at each block
-## TODO: add residuals in conv block
-class DDPM(nn.Module):
+class DDPMnet(nn.Module):
     """
     dim:        dimension of images
     n_steps:    number of diffusion steps
@@ -201,24 +196,22 @@ class DDPM(nn.Module):
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
-
         self.dim = dim
-
         self.n_steps = n_steps
 
         if noise_schedule is not None:
             self.noise_schedule = self.noise_schedule
         else:
-            self.noise_schedule = torch.linspace(1e-4, 2e-2, self.n_steps)
+            self.noise_schedule = Parameter(torch.linspace(1e-4, 2e-2, self.n_steps), requires_grad=False)
 
         self.alphas = 1 - self.noise_schedule
-
-        self.prod_alphas = torch.cumprod(self.alphas, dim=0)
-
+        self.prod_alphas = Parameter(torch.cumprod(self.alphas, dim=0), requires_grad=False)
         self.noisenet = ResUNetCIFAR10()
 
-    def forward(self):
-        pass
+    def forward(self, x0, noise, t):
+
+        xt = torch.sqrt(self.prod_alphas[t]) * x0 + torch.sqrt(1 - self.prod_alphas[t]) * noise
+        return self.noisenet(xt,t)
 
 if __name__ == "__main__":
     x = torch.randn((2, 3, 32, 32))
@@ -226,3 +219,4 @@ if __name__ == "__main__":
     unet = ResUNetCIFAR10()
     s = unet(x, t)
     print(s.shape)
+    print(unet.parameters())
