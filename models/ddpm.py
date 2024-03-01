@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn import Conv2d, ConvTranspose2d, MaxPool2d, ReLU
+from torch.nn import Conv2d, ConvTranspose2d, MaxPool2d, ReLU, Linear
 
 import diffusers
 from diffusers import UNet2DModel
@@ -106,8 +106,6 @@ class UNetDecLayer(nn.Module):
 class ResUNetCIFAR10(nn.Module):
     """
     Hardcoded with CIFAR10 dimensions and fixed padding
-
-    TODO: add residual connections
     """
 
     def __init__(self, *args, **kwargs):
@@ -116,24 +114,50 @@ class ResUNetCIFAR10(nn.Module):
         self.maxpool = MaxPool2d(kernel_size=2)
 
         # encoding convolutions
-        self.enc1 = UNetConvLayer(3, 16)     # 16x16x16
-        self.enc2 = UNetConvLayer(16, 32)    # 32x8x8
-        self.enc3 = UNetConvLayer(32, 64)   # 64x4x4
+        self.enc1 = UNetConvLayer(3, 16, num_groups=2)     # 16x16x16
+        self.enc2 = UNetConvLayer(16, 32, num_groups=4)    # 32x8x8
+        self.enc3 = UNetConvLayer(32, 64, num_groups=8)   # 64x4x4
 
         # middle convolution
         self.midconv = UNetConvLayer(64, 128)
 
         # decoder up convolutions
         # residual has `out_channels` channels
-        self.dec3 = UNetDecLayer(128, 64)
-        self.dec2 = UNetDecLayer(64, 32)
-        self.dec1 = UNetDecLayer(32, 16)
+        self.dec3 = UNetDecLayer(128, 64, num_groups=8)
+        self.dec2 = UNetDecLayer(64, 32, num_groups=4)
+        self.dec1 = UNetDecLayer(32, 16, num_groups=2)
 
         # out layers
         self.outconv = UNetConvLayer(16, 8)
+        self.gn_out = nn.GroupNorm(
+            num_groups=1,
+            num_channels=8
+        )
         self.outlayer = Conv2d(in_channels=8, out_channels=3, kernel_size=1)
 
+        # position net
+        self.position_net = nn.Sequential(
+            Linear(1024, 2048),
+            ReLU(),
+            Linear(2048, 4096),
+            ReLU(),
+            Linear(4096, 4096),
+            ReLU(),
+            Linear(4096, 2048),
+            ReLU(),
+            Linear(2048, 1024),
+            ReLU(),
+            Linear(1024, 1024)
+        )
+
+
     def forward(self, x, t):
+
+        # position embedding
+        t_emb = self.position_net(
+            self.positional_encoding(t)
+        )
+        t_emb.reshape((32, 32))
 
         # encoding steps
         x1 = self.enc1(x)       # 16x32x32
@@ -144,19 +168,26 @@ class ResUNetCIFAR10(nn.Module):
         x3d = self.midconv(self.maxpool(x3))
 
         # decoding steps
-
         x2d = self.dec3(x3d, x3)
         x1d = self.dec2(x2d, x2)
         xout = self.dec1(x1d, x1)
 
-        return self.outlayer(self.outconv(xout))
+        return self.outlayer(self.gn_out(self.outconv(xout)))
 
-    def positional_encoding(self, t, dim=256, n=1e5):
+    def positional_encoding(self, t, dim=1024, n=1e5):
         enc = torch.zeros(dim)
+
+        # sine indices
         enc[2 * torch.arange(dim/2, dtype=torch.int64)] = torch.sin(t / n**(torch.arange(dim/2)/dim))
+
+        # cosine indices
         enc[1 + 2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.cos(t / n ** (torch.arange(dim / 2) / dim))
+
         return enc
 
+## TODO: add attention
+## TODO: positional MLP at each block
+## TODO: add residuals in conv block
 class DDPM(nn.Module):
     """
     dim:        dimension of images
@@ -190,8 +221,8 @@ class DDPM(nn.Module):
         pass
 
 if __name__ == "__main__":
-    tensor = torch.randn((3, 32, 32))
+    x = torch.randn((2, 3, 32, 32))
+    t = 4
     unet = ResUNetCIFAR10()
-    #s = unet(tensor)
-    #print(s.shape)
-    unet.positional_encoding(5)
+    s = unet(x, t)
+    print(s.shape)
