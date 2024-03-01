@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn import Conv2d, ConvTranspose2d, MaxPool2d, ReLU, Linear
+from torch.nn import Conv2d, ConvTranspose2d, MaxPool2d, ReLU, Linear, MultiheadAttention
 from torch.nn.parameter import Parameter
 
 import diffusers
@@ -17,40 +17,50 @@ class UNetConvLayer(nn.Module):
                  kernel_size=2,
                  padding="same",
                  num_groups=4,
+                 residual=True,
+                 attention=False,
+                 n_head=4,
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.gn1 = nn.GroupNorm(
-            num_groups=num_groups,
-            num_channels=out_channels
-        )
+        self.has_residual = residual
+        self.has_attention = attention
+        self.n_head = n_head
 
-        self.gn2 = nn.GroupNorm(
-            num_groups=num_groups,
-            num_channels=out_channels
-        )
+        # main convs
+        self.conv1 = Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+        self.conv2 = Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding)
 
-        self.conv1 = Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            padding=padding
-        )
+        self.gn1 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        self.gn2 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
-        self.conv2 = Conv2d(
-            out_channels,
-            out_channels,
-            kernel_size=kernel_size,
-            padding=padding
-        )
+        # residual
+        self.resconv = Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+        self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
+        # attention
+        self.attn = MultiheadAttention(embed_dim=out_channels**2, num_heads=self.n_head)
     def forward(self, x):
+        x_in = x
+
         x = ReLU()(self.conv1(x))
         x = self.gn1(x)
+
+        ## TODO: implement this better
+        #if self.has_attention:
+         #   x = self.attn(x)
+
         x = ReLU()(self.conv2(x))
         x = self.gn2(x)
+
+        if self.has_residual:
+            xres = ReLU()((self.resconv(x_in)))
+            xres = self.gn_res(xres)
+            return x + xres
+
         return x
+
 
 class UNetDecLayer(nn.Module):
 
@@ -78,7 +88,7 @@ class UNetDecLayer(nn.Module):
             num_channels=out_channels
         )
 
-        self.upconv = ConvTranspose2d(
+        self.up_conv = ConvTranspose2d(
             in_channels=in_channels,
             out_channels=out_channels, kernel_size=2, stride=2
         )
@@ -96,7 +106,7 @@ class UNetDecLayer(nn.Module):
         )
 
     def forward(self, x, x_res):
-        x = self.upconv(x)
+        x = self.up_conv(x)
         x = self.gn_up(x)
         x = x + self.res_conv(x_res)
         x = self.conv(x)
@@ -115,9 +125,9 @@ class ResUNetCIFAR10(nn.Module):
         self.maxpool = MaxPool2d(kernel_size=2)
 
         # encoding convolutions
-        self.enc1 = UNetConvLayer(3, 16, num_groups=2)     # 16x16x16
-        self.enc2 = UNetConvLayer(16, 32, num_groups=4)    # 32x8x8
-        self.enc3 = UNetConvLayer(32, 64, num_groups=8)   # 64x4x4
+        self.enc1 = UNetConvLayer(3, 16, num_groups=2)  # 16x16x16
+        self.enc2 = UNetConvLayer(16, 32, num_groups=4)  # 32x8x8
+        self.enc3 = UNetConvLayer(32, 64, num_groups=8)  # 64x4x4
 
         # middle convolution
         self.midconv = UNetConvLayer(64, 128)
@@ -149,21 +159,13 @@ class ResUNetCIFAR10(nn.Module):
         #    Linear(2048, 1024),
         #    ReLU(),
         #    Linear(1024, 1024)
-        #)
-
+        # )
 
     def forward(self, x, t):
-
-        # position embedding
-        #t_emb = self.position_net(
-        #    self.positional_encoding(t)
-        #)
-        #t_emb.reshape((32, 32))
-
         # encoding steps
-        x1 = self.enc1(x)       # 16x32x32
-        x2 = self.enc2(self.maxpool(x1))    # 32x16x16
-        x3 = self.enc3(self.maxpool(x2))    # 64x8x8
+        x1 = self.enc1(x)  # 16x32x32
+        x2 = self.enc2(self.maxpool(x1))  # 32x16x16
+        x3 = self.enc3(self.maxpool(x2))  # 64x8x8
 
         # middle convolution
         x3d = self.midconv(self.maxpool(x3))
@@ -178,10 +180,11 @@ class ResUNetCIFAR10(nn.Module):
     def positional_encoding(self, t, dim=1024, n=1e5):
         enc = torch.zeros(dim)
         # sine indices
-        enc[2 * torch.arange(dim/2, dtype=torch.int64)] = torch.sin(t / n**(torch.arange(dim/2)/dim))
+        enc[2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.sin(t / n ** (torch.arange(dim / 2) / dim))
         # cosine indices
         enc[1 + 2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.cos(t / n ** (torch.arange(dim / 2) / dim))
         return enc
+
 
 class DDPMnet(nn.Module):
     """
@@ -211,7 +214,8 @@ class DDPMnet(nn.Module):
     def forward(self, x0, noise, t):
 
         xt = torch.sqrt(self.prod_alphas[t]) * x0 + torch.sqrt(1 - self.prod_alphas[t]) * noise
-        return self.noisenet(xt,t)
+        return self.noisenet(xt, t)
+
 
 if __name__ == "__main__":
     x = torch.randn((2, 3, 32, 32))
