@@ -20,6 +20,7 @@ class UNetConvLayer(nn.Module):
                  residual=True,
                  attention=False,
                  n_head=4,
+                 time_channels=1024,
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
@@ -27,6 +28,10 @@ class UNetConvLayer(nn.Module):
         self.has_residual = residual
         self.has_attention = attention
         self.n_head = n_head
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.time_channels = time_channels
 
         # main convs
         self.conv1 = Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
@@ -36,16 +41,42 @@ class UNetConvLayer(nn.Module):
         self.gn2 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
         # residual
-        self.resconv = Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+        self.resconv = Conv2d(in_channels, out_channels, kernel_size=1, padding=padding)
         self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
         # attention
         self.attn = MultiheadAttention(embed_dim=out_channels**2, num_heads=self.n_head)
-    def forward(self, x):
+
+        # time embedding net
+        self.time_net = nn.Linear(time_channels, out_channels)
+
+    def _make_mlp(self, in_channels, out_channels):
+        c = max([in_channels, out_channels])
+        net = nn.Sequential(
+            Linear(in_channels, 2 * c),
+            ReLU(),
+            Linear(2 * c, 4 * c),
+            ReLU(),
+            Linear(4 * c, 4 * c),
+            ReLU(),
+            Linear(4 * c, 2 * c),
+            ReLU(),
+            Linear(2 * c, out_channels)
+        )
+        return net
+
+
+    def forward(self, x, t):
+        # get time encoding
+        t = self.positional_encoding(t, dim=self.time_channels)
+        t = self.time_net(t)
+
         x_in = x
 
         x = ReLU()(self.conv1(x))
         x = self.gn1(x)
+
+        x = x + t
 
         ## TODO: implement this better
         #if self.has_attention:
@@ -58,8 +89,15 @@ class UNetConvLayer(nn.Module):
             xres = ReLU()((self.resconv(x_in)))
             xres = self.gn_res(xres)
             return x + xres
-
         return x
+
+    def positional_encoding(self, t, dim=1024, n=1e5):
+        enc = torch.zeros(dim)
+        # sine indices
+        enc[2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.sin(t / n ** (torch.arange(dim / 2) / dim))
+        # cosine indices
+        enc[1 + 2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.cos(t / n ** (torch.arange(dim / 2) / dim))
+        return enc
 
 
 class UNetDecLayer(nn.Module):
@@ -145,21 +183,6 @@ class ResUNetCIFAR10(nn.Module):
             num_channels=8
         )
         self.outlayer = Conv2d(in_channels=8, out_channels=3, kernel_size=1)
-
-        # position net
-        # self.position_net = nn.Sequential(
-        #    Linear(1024, 2048),
-        #    ReLU(),
-        #    Linear(2048, 4096),
-        #    ReLU(),
-        #    Linear(4096, 4096),
-        #    ReLU(),
-        #    Linear(4096, 2048),
-        #    ReLU(),
-        #    Linear(2048, 1024),
-        #    ReLU(),
-        #    Linear(1024, 1024)
-        # )
 
     def forward(self, x, t):
         # encoding steps
