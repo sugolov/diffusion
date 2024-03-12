@@ -4,6 +4,7 @@ from PIL import Image
 
 import torch
 from torch.nn import Conv2d, MaxPool2d, ConvTranspose2d
+from models.ddpm import *
 
 def test_cifar10_load():
     """
@@ -24,5 +25,28 @@ def test_conv_shapes():
     #tensor = Conv2d(in_channels=3, out_channels=8, padding=1, kernel_size=2)(tensor)
     #tensor = MaxPool2d(kernel_size=2)(tensor)
     print(tensor.shape)
+
+def test_unet():
+    x = torch.randn((2, 3, 32, 32))
+    t = 4
+    unet = ResUNetCIFAR10()
+    s = unet(x, t)
+    print(s.shape)
+    print(unet.parameters())
+
+def test_mlp():
+    tensor = torch.randn((3,))
+    mlp = MLP(layer_dims=[3, 64, 64, 1])
+    print(mlp(tensor))
+
+def test_attn_conv():
+    tensor = torch.randn((2, 3, 32, 32))
+    conv = UNetConvLayer(3, 8, num_groups=4)
+    print(conv(tensor).shape)
+
+if __name__ == "__main__":
+    tensor = torch.randn((2, 3, 32, 32))
+    print(torch.flatten(tensor, start_dim=1).shape)
+    test_attn_conv()
 
 

@@ -7,9 +7,80 @@ from torch.nn.parameter import Parameter
 import diffusers
 from diffusers import UNet2DModel
 
-from test.test_ddpm import *
+#from test.test_ddpm import *
 
-class UNetConvLayer(nn.Module):
+class MLP(nn.Module):
+    def __init__(self, layer_dims, activations=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.layers = []
+
+        if activations is None:
+            self.activations = [nn.ReLU() for _ in range(len(layer_dims)-1)]
+        else:
+            self.activations = activations
+
+        for dim_in, dim_out in zip(layer_dims[:-1], layer_dims[1:],):
+            self.layers.append(nn.Linear(dim_in, dim_out))
+
+    def forward(self, x):
+        for L, f in zip(self.layers[:-1], self.activations):
+            x = f(L(x))
+
+        x = self.layers[-1](x)
+
+        return x
+
+class ConvLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, activation=nn.ReLU(), kernel_size=2, padding="same", *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+        self.activation = activation
+
+    def forward(self, x):
+        return self.activation(self.conv(x))
+
+
+class UNetConvBlock(nn.Module):
+    def __init__(self, in_channels,
+                 out_channels,
+                 kernel_size=2,
+                 padding="same",
+                 num_groups=4,
+                 mlp_layers=(1024,),
+                 *args,
+                 **kwargs):
+
+        super().__init__(*args, **kwargs)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        # main convs
+        self.conv1 = ConvLayer(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
+        self.conv2 = ConvLayer(out_channels, out_channels, kernel_size=kernel_size, padding=padding)
+
+        # group norm
+        self.gn1 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        self.gn2 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+
+        self.time_net = MLP(layer_dims=mlp_layers + (self.out_channels,))
+
+
+    def forward(self, x, t):
+        t = self.time_net(t)
+
+        x = self.conv1(x)
+        #x = self.gn1(x)
+
+        x = x + t
+
+        x = self.conv2(x)
+        #x = self.gn2(x)
+
+        return x
+
+class UNetEncoderLayer(nn.Module):
 
     def __init__(self,
                  in_channels,
@@ -18,89 +89,45 @@ class UNetConvLayer(nn.Module):
                  padding="same",
                  num_groups=4,
                  residual=True,
-                 attention=False,
                  n_head=4,
                  time_channels=1024,
+                 mlp_layers=(1024, 1024, 1024),
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.has_residual = residual
-        self.has_attention = attention
         self.n_head = n_head
+        self.residual = residual
 
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.time_channels = time_channels
-
-        # main convs
-        self.conv1 = Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-        self.conv2 = Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding)
-
-        self.gn1 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
-        self.gn2 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        # double conv
+        self.conv = UNetConvBlock(in_channels,
+                                  out_channels,
+                                  kernel_size=kernel_size,
+                                  padding=padding,
+                                  num_groups=num_groups,
+                                  mlp_layers=mlp_layers
+                                  )
 
         # residual
-        self.resconv = Conv2d(in_channels, out_channels, kernel_size=1, padding=padding)
+        if self.residual:
+            self.res_conv = nn.ModuleList([Conv2d(in_channels, out_channels, kernel_size=1, padding=padding), ReLU()])
+        else:
+            self.res_conv = None
+
         self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
-        # attention
-        self.attn = MultiheadAttention(embed_dim=out_channels**2, num_heads=self.n_head)
-
-        # time embedding net
-        self.time_net = nn.Linear(time_channels, out_channels)
-
-    def _make_mlp(self, in_channels, out_channels):
-        c = max([in_channels, out_channels])
-        net = nn.Sequential(
-            Linear(in_channels, 2 * c),
-            ReLU(),
-            Linear(2 * c, 4 * c),
-            ReLU(),
-            Linear(4 * c, 4 * c),
-            ReLU(),
-            Linear(4 * c, 2 * c),
-            ReLU(),
-            Linear(2 * c, out_channels)
-        )
-        return net
-
-
     def forward(self, x, t):
-        # get time encoding
-        t = self.positional_encoding(t, dim=self.time_channels)
-        t = self.time_net(t)
 
-        x_in = x
-
-        x = ReLU()(self.conv1(x))
-        x = self.gn1(x)
-
-        x = x + t
-
-        ## TODO: implement this better
-        #if self.has_attention:
-         #   x = self.attn(x)
-
-        x = ReLU()(self.conv2(x))
-        x = self.gn2(x)
+        x = self.conv(x, t)
 
         if self.has_residual:
-            xres = ReLU()((self.resconv(x_in)))
-            xres = self.gn_res(xres)
+            xres = self.res_conv(x)
+            #xres = self.gn_res(xres)
             return x + xres
+
         return x
 
-    def positional_encoding(self, t, dim=1024, n=1e5):
-        enc = torch.zeros(dim)
-        # sine indices
-        enc[2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.sin(t / n ** (torch.arange(dim / 2) / dim))
-        # cosine indices
-        enc[1 + 2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.cos(t / n ** (torch.arange(dim / 2) / dim))
-        return enc
-
-
-class UNetDecLayer(nn.Module):
+class UNetDecoderLayer(nn.Module):
 
     def __init__(self,
                  in_channels,
