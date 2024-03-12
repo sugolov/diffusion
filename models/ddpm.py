@@ -67,13 +67,18 @@ class UNetConvBlock(nn.Module):
         self.time_net = MLP(layer_dims=mlp_layers + (self.out_channels,))
 
 
-    def forward(self, x, t):
+    def forward(self, x, t=None):
         t = self.time_net(t)
-
         x = self.conv1(x)
         #x = self.gn1(x)
 
-        x = x + t
+        print(t.shape)
+
+        print(x.shape)
+
+        if t is not None:
+            x = x + t
+
 
         x = self.conv2(x)
         #x = self.gn2(x)
@@ -140,7 +145,7 @@ class UNetDecoderLayer(nn.Module):
                  ):
         super().__init__(*args, **kwargs)
 
-        self.conv = UNetConvLayer(
+        self.conv = UNetConvBlock(
             out_channels,
             out_channels,
             kernel_size=kernel_size,
@@ -166,16 +171,18 @@ class UNetDecoderLayer(nn.Module):
         self.res_conv = Conv2d(
             in_channels=out_channels,
             out_channels=out_channels,
-            kernel_size=kernel_size,
+            kernel_size=1,
             padding=padding
         )
 
     def forward(self, x, x_res):
         x = self.up_conv(x)
-        x = self.gn_up(x)
+        #x = self.gn_up(x)
+
         x = x + self.res_conv(x_res)
+
         x = self.conv(x)
-        x = self.gn_res(x)
+        #x = self.gn_res(x)
         return x
 
 
@@ -190,32 +197,35 @@ class ResUNetCIFAR10(nn.Module):
         self.maxpool = MaxPool2d(kernel_size=2)
 
         # encoding convolutions
-        self.enc1 = UNetConvLayer(3, 16, num_groups=2)  # 16x16x16
-        self.enc2 = UNetConvLayer(16, 32, num_groups=4)  # 32x8x8
-        self.enc3 = UNetConvLayer(32, 64, num_groups=8)  # 64x4x4
+        self.enc1 = UNetEncoderLayer(3, 16, num_groups=2)  # 16x16x16
+        self.enc2 = UNetEncoderLayer(16, 32, num_groups=4)  # 32x8x8
+        self.enc3 = UNetEncoderLayer(32, 64, num_groups=8)  # 64x4x4
 
         # middle convolution
-        self.midconv = UNetConvLayer(64, 128)
+        self.midconv = ConvLayer(64, 128)
 
         # decoder up convolutions
         # residual has `out_channels` channels
-        self.dec3 = UNetDecLayer(128, 64, num_groups=8)
-        self.dec2 = UNetDecLayer(64, 32, num_groups=4)
-        self.dec1 = UNetDecLayer(32, 16, num_groups=2)
+        self.dec3 = UNetDecoderLayer(128, 64, num_groups=8)
+        self.dec2 = UNetDecoderLayer(64, 32, num_groups=4)
+        self.dec1 = UNetDecoderLayer(32, 16, num_groups=2)
 
         # out layers
-        self.outconv = UNetConvLayer(16, 8)
+        self.outconv = ConvLayer(16, 8)
+
         self.gn_out = nn.GroupNorm(
             num_groups=1,
             num_channels=8
         )
-        self.outlayer = Conv2d(in_channels=8, out_channels=3, kernel_size=1)
+
+        self.outlayer= Conv2d(in_channels=8, out_channels=3, kernel_size=1)
 
     def forward(self, x, t):
+        t = self.positional_encoding(t)
         # encoding steps
-        x1 = self.enc1(x)  # 16x32x32
-        x2 = self.enc2(self.maxpool(x1))  # 32x16x16
-        x3 = self.enc3(self.maxpool(x2))  # 64x8x8
+        x1 = self.enc1(x, t)  # 16x32x32
+        x2 = self.enc2(self.maxpool(x1), t)  # 32x16x16
+        x3 = self.enc3(self.maxpool(x2), t)  # 64x8x8
 
         # middle convolution
         x3d = self.midconv(self.maxpool(x3))
@@ -273,4 +283,4 @@ if __name__ == "__main__":
     unet = ResUNetCIFAR10()
     s = unet(x, t)
     print(s.shape)
-    print(unet.parameters())
+    #print(unet.parameters())
