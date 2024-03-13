@@ -1,5 +1,5 @@
 # Diffusion
-Training and understanding diffusion models
+Training and understanding diffusion models and EBMs
 
 ### DDPM
 
