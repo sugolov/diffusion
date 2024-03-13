@@ -1,10 +1,9 @@
-from models import ddpm
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 import torch
 
-from models.ddpm import DDPMnet
+from model.ddpm import DDPMnet
 from utils.utils import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
