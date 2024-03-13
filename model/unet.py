@@ -65,8 +65,8 @@ class UNetConvBlock(nn.Module):
         self.conv2 = ConvLayer(out_channels, out_channels, kernel_size=kernel_size, padding=padding)
 
         # group norm
-        #self.gn1 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
-        #self.gn2 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        # self.gn1 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        # self.gn2 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
         self.time_net = MLP(layer_dims=mlp_layers + (self.out_channels,))
 
@@ -128,7 +128,7 @@ class UNetEncoderLayer(nn.Module):
         else:
             self.res_conv = None
 
-        #self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        # self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
     def forward(self, x, t):
         x_in = x
@@ -205,7 +205,19 @@ class UNet(nn.Module):
     UNet that can be set up with a single config
     """
 
-    def __init__(self, layer_channels, layer_attention, maxpool_size=2, time_emb_dim=1024, time_n=1e5, *args, **kwargs):
+    def __init__(self, layer_channels, layer_attention,
+                 maxpool_size=2,
+                 time_emb_dim=1024,
+                 time_n=1e5,
+                 kernel_size=2,
+                 upsample_size=2,
+                 padding="same",
+                 num_groups=4,
+                 residual=True,
+                 mlp_layers=None,
+                 num_heads=4,
+                 embed_dim=16,
+                 *args, **kwargs):
         """
         Set up a UNet for DDPM with any layer config
 
@@ -215,13 +227,17 @@ class UNet(nn.Module):
         """
         super().__init__(*args, **kwargs)
 
-        self.time_emb_dim=time_emb_dim
-        self.time_n=time_n
+        self.time_emb_dim = time_emb_dim
+        self.time_n = time_n
 
         self.maxpool = MaxPool2d(kernel_size=maxpool_size)
 
         self.encoders = nn.ModuleList([])
         self.decoders = nn.ModuleList([])
+
+        # first dimension of MLP should just be time_emb_dim
+        if mlp_layers is None:
+            mlp_layers = (time_emb_dim,)
 
         for in_channels, out_channels, attn in zip(layer_channels[:-1], layer_channels[1:], layer_attention):
             self.encoders.append(
@@ -229,13 +245,18 @@ class UNet(nn.Module):
                     in_channels=in_channels,
                     out_channels=out_channels,
                     attention=attn,
-                    **kwargs
+                    kernel_size=kernel_size,
+                    padding=padding,
+                    num_heads=num_heads,
+                    embed_dim=embed_dim,
+                    mlp_layers=mlp_layers,
+                    residual=True
                 )
             )
 
         self.midconv = UNetConvBlock(
             in_channels=layer_channels[-1],
-            out_channels=2*layer_channels[-1]
+            out_channels=2 * layer_channels[-1]
         )
 
         for in_channels, out_channels, attention in zip(
@@ -243,15 +264,20 @@ class UNet(nn.Module):
         ):
             self.decoders.append(
                 UNetDecoderLayer(
-                    in_channels=2*in_channels,
-                    out_channels=2*out_channels,
+                    in_channels=2 * in_channels,
+                    out_channels=2 * out_channels,
                     attention=attention,
-                    **kwargs
+                    kernel_size=kernel_size,
+                    upsample_size=upsample_size,
+                    padding=padding,
+                    num_heads=num_heads,
+                    embed_dim=embed_dim,
+                    mlp_layers=mlp_layers
                 )
             )
 
         self.out_layer = nn.Sequential(
-            UNetConvBlock(2*layer_channels[1], layer_channels[1]),
+            UNetConvBlock(2 * layer_channels[1], layer_channels[1]),
             nn.Conv2d(layer_channels[1], layer_channels[0], kernel_size=1)
         )
 
@@ -284,9 +310,9 @@ class UNet(nn.Module):
         return enc
 
 
-class ResUNetCIFAR10(nn.Module):
+class UNetCIFAR10(nn.Module):
     """
-    Hardcoded with CIFAR10 dimensions and fixed padding
+    Hardcoded UNet with CIFAR10 dimensions
     """
 
     def __init__(self, *args, **kwargs):
