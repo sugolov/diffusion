@@ -32,13 +32,36 @@ class MLP(nn.Module):
         return x
 
 class ConvLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, activation=nn.ReLU(), kernel_size=2, padding="same", *args, **kwargs):
+    def __init__(self, in_channels, out_channels, activation=nn.SiLU(), kernel_size=2, padding="same", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
         self.activation = activation
 
     def forward(self, x):
         return self.activation(self.conv(x))
+
+class AttentionConv(nn.Module):
+    def __init__(self, out_channels, kernel_size=2, padding="same", embed_dim=32, num_heads=4, *args, **kwargs):
+
+        super().__init__(*args, **kwargs)
+
+        # main convs
+        self.in_conv = ConvLayer(out_channels, 1, kernel_size=kernel_size, padding=padding)
+        self.out_conv = ConvLayer(1, out_channels, kernel_size=kernel_size, padding=padding)
+
+        self.attn = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads)
+
+    def forward(self, x):
+        x_in = x
+        x = self.in_conv(x)
+
+        # drop the channel dim during attention computation
+        x = x[:, 0, :, :]
+        x = self.attn(x, x, x)[0]
+        x = x[:, None, :, :]
+
+        x = self.out_conv(x)
+        return x + x_in
 
 
 class UNetConvBlock(nn.Module):
@@ -48,6 +71,9 @@ class UNetConvBlock(nn.Module):
                  padding="same",
                  num_groups=4,
                  mlp_layers=(1024,),
+                 attention=False,
+                 embed_dim=16,
+                 num_heads=4,
                  *args,
                  **kwargs):
 
@@ -66,19 +92,23 @@ class UNetConvBlock(nn.Module):
 
         self.time_net = MLP(layer_dims=mlp_layers + (self.out_channels,))
 
+        if attention:
+            self.attn = AttentionConv(out_channels=out_channels, kernel_size=kernel_size, embed_dim=embed_dim, num_heads=num_heads)
+        else:
+            self.attn = nn.Identity()
+
 
     def forward(self, x, t=None):
-        t = self.time_net(t)
+        if t is not None:
+            t = self.time_net(t)
+
         x = self.conv1(x)
         #x = self.gn1(x)
 
-        print(t.shape)
-
-        print(x.shape)
-
         if t is not None:
-            x = x + t
+            x = x + t[:, None, None]
 
+        x = self.attn(x)
 
         x = self.conv2(x)
         #x = self.gn2(x)
@@ -94,42 +124,42 @@ class UNetEncoderLayer(nn.Module):
                  padding="same",
                  num_groups=4,
                  residual=True,
-                 n_head=4,
-                 time_channels=1024,
-                 mlp_layers=(1024, 1024, 1024),
+                 mlp_layers=(1024,),
+                 attention=False,
+                 embed_dim=16,
+                 num_heads=4,
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.n_head = n_head
         self.residual = residual
 
         # double conv
-        self.conv = UNetConvBlock(in_channels,
-                                  out_channels,
+        self.conv = UNetConvBlock(in_channels, out_channels,
                                   kernel_size=kernel_size,
                                   padding=padding,
                                   num_groups=num_groups,
-                                  mlp_layers=mlp_layers
-                                  )
-
+                                  mlp_layers=mlp_layers,
+                                  attention=attention,
+                                  embed_dim=embed_dim,
+                                  num_heads=num_heads)
         # residual
         if self.residual:
-            self.res_conv = nn.ModuleList([Conv2d(in_channels, out_channels, kernel_size=1, padding=padding), ReLU()])
+            self.res_conv = Conv2d(in_channels, out_channels, kernel_size=1, padding=padding)
         else:
             self.res_conv = None
 
         self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
     def forward(self, x, t):
+        x_in = x
 
         x = self.conv(x, t)
 
-        if self.has_residual:
-            xres = self.res_conv(x)
+        if self.residual:
+            x_res = nn.SiLU()(self.res_conv(x_in))
             #xres = self.gn_res(xres)
-            return x + xres
-
+            return x + x_res
         return x
 
 class UNetDecoderLayer(nn.Module):
@@ -140,6 +170,7 @@ class UNetDecoderLayer(nn.Module):
                  kernel_size=2,
                  padding="same",
                  num_groups=4,
+                 mlp_layers=(1024,),
                  *args,
                  **kwargs
                  ):
@@ -150,38 +181,31 @@ class UNetDecoderLayer(nn.Module):
             out_channels,
             kernel_size=kernel_size,
             padding=padding,
-            num_groups=num_groups
+            mlp_layers=mlp_layers
         )
 
-        self.gn_up = nn.GroupNorm(
-            num_groups=num_groups,
-            num_channels=out_channels
-        )
+        #self.gn_up = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
         self.up_conv = ConvTranspose2d(
             in_channels=in_channels,
             out_channels=out_channels, kernel_size=2, stride=2
         )
 
-        self.gn_res = nn.GroupNorm(
-            num_groups=num_groups,
-            num_channels=out_channels
-        )
+        #self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
         self.res_conv = Conv2d(
             in_channels=out_channels,
             out_channels=out_channels,
-            kernel_size=1,
+            kernel_size=kernel_size,
             padding=padding
         )
 
-    def forward(self, x, x_res):
+    def forward(self, x, x_res, t):
         x = self.up_conv(x)
         #x = self.gn_up(x)
-
         x = x + self.res_conv(x_res)
 
-        x = self.conv(x)
+        x = self.conv(x, t)
         #x = self.gn_res(x)
         return x
 
@@ -198,11 +222,11 @@ class ResUNetCIFAR10(nn.Module):
 
         # encoding convolutions
         self.enc1 = UNetEncoderLayer(3, 16, num_groups=2)  # 16x16x16
-        self.enc2 = UNetEncoderLayer(16, 32, num_groups=4)  # 32x8x8
+        self.enc2 = UNetEncoderLayer(16, 32, num_groups=4, attention=True, embed_dim=16)  # 32x8x8
         self.enc3 = UNetEncoderLayer(32, 64, num_groups=8)  # 64x4x4
 
         # middle convolution
-        self.midconv = ConvLayer(64, 128)
+        self.midconv = UNetConvBlock(64, 128)
 
         # decoder up convolutions
         # residual has `out_channels` channels
@@ -211,14 +235,12 @@ class ResUNetCIFAR10(nn.Module):
         self.dec1 = UNetDecoderLayer(32, 16, num_groups=2)
 
         # out layers
-        self.outconv = ConvLayer(16, 8)
-
+        self.outconv = UNetConvBlock(16, 8)
         self.gn_out = nn.GroupNorm(
             num_groups=1,
             num_channels=8
         )
-
-        self.outlayer= Conv2d(in_channels=8, out_channels=3, kernel_size=1)
+        self.outlayer = Conv2d(in_channels=8, out_channels=3, kernel_size=1)
 
     def forward(self, x, t):
         t = self.positional_encoding(t)
@@ -231,11 +253,12 @@ class ResUNetCIFAR10(nn.Module):
         x3d = self.midconv(self.maxpool(x3))
 
         # decoding steps
-        x2d = self.dec3(x3d, x3)
-        x1d = self.dec2(x2d, x2)
-        xout = self.dec1(x1d, x1)
+        x2d = self.dec3(x3d, x3, t)
+        x1d = self.dec2(x2d, x2, t)
+        xout = self.dec1(x1d, x1, t)
 
-        return self.outlayer(self.gn_out(self.outconv(xout)))
+        #return self.outlayer(self.gn_out(self.outconv(xout)))
+        return self.outlayer(self.outconv(xout))
 
     def positional_encoding(self, t, dim=1024, n=1e5):
         enc = torch.zeros(dim)
@@ -278,9 +301,8 @@ class DDPMnet(nn.Module):
 
 
 if __name__ == "__main__":
-    x = torch.randn((2, 3, 32, 32))
+    x = torch.randn((128, 3, 32, 32))
     t = 4
     unet = ResUNetCIFAR10()
     s = unet(x, t)
     print(s.shape)
-    #print(unet.parameters())

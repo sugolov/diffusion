@@ -40,13 +40,11 @@ def test_mlp():
     print(mlp(tensor))
 
 def test_attn_conv():
-    tensor = torch.randn((2, 3, 32, 32))
-    conv = UNetConvLayer(3, 8, num_groups=4)
+    tensor = torch.randn((5, 3, 8, 8))
+    conv = AttentionConv(3, embed_dim=8)
     print(conv(tensor).shape)
 
 if __name__ == "__main__":
-    tensor = torch.randn((2, 3, 32, 32))
-    print(torch.flatten(tensor, start_dim=1).shape)
     test_attn_conv()
 
 
