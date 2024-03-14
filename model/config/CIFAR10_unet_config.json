@@ -1,1 +1,1 @@
-{"layer_channels": [3, 8, 16, 32, 64], "layer_attention": [false, true, false, false], "time_emb_dim": 1024, "time_n": 100000.0, "kernel_size": 2, "upsample_size": 2, "residual": true, "padding": "same", "num_groups": 4, "mlp_layers": [1024], "num_heads": 4, "embed_dim": 16}
+{"layer_channels": [3, 8, 16, 32, 64], "layer_attention": [false, true, false, false], "layer_groups": [1, 2, 4, 8], "time_emb_dim": 1024, "time_n": 100000.0, "kernel_size": 2, "upsample_size": 2, "residual": true, "padding": "same", "mlp_layers": null, "num_heads": 4, "embed_dim": 64, "out_groups": 4}

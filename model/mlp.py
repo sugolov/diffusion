@@ -1,11 +1,10 @@
 import torch.nn as nn
 
-
 class MLP(nn.Module):
     def __init__(self, layer_dims, activations=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.layers = []
+        self.layers = nn.ModuleList([])
 
         if activations is None:
             self.activations = [nn.ReLU() for _ in range(len(layer_dims) - 1)]

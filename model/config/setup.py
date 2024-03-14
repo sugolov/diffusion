@@ -1,4 +1,5 @@
-from utils.utils import save_config
+from utils.utils import save_config, load_config
+
 
 CIFAR10_unet_config = {
     "layer_channels": [3, 8, 16, 32, 64],
@@ -18,3 +19,4 @@ CIFAR10_unet_config = {
 
 if __name__ == "__main__":
     save_config(CIFAR10_unet_config, "CIFAR10_unet_config")
+    config = load_config("CIFAR10_unet_config")

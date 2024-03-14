@@ -296,6 +296,11 @@ class UNet(nn.Module):
             )
 
         self.out_layer = nn.Sequential(
+            ConvTranspose2d(in_channels=2 * layer_channels[1],
+                            out_channels=2 * layer_channels[1],
+                            kernel_size=upsample_size,
+                            stride=upsample_size
+                            ),
             UNetConvBlock(2 * layer_channels[1], layer_channels[1]),
             nn.GroupNorm(num_channels=layer_channels[1], num_groups=out_groups),
             nn.Conv2d(layer_channels[1], layer_channels[0], kernel_size=1),
@@ -320,13 +325,15 @@ class UNet(nn.Module):
 
         return x_out
 
+    # TODO: make this nn.Module so that specifying device is not needed
     @staticmethod
     def positional_encoding(t, dim=1024, n=1e5):
-        enc = torch.zeros(dim)
+        enc = torch.zeros(dim, device="cuda")
         # sine indices
-        enc[2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.sin(t / n ** (torch.arange(dim / 2) / dim))
+        enc[2 * torch.arange(dim / 2, dtype=torch.int64, device="cuda")] = torch.sin(t / n ** (torch.arange(dim / 2, device="cuda") / dim))
         # cosine indices
-        enc[1 + 2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.cos(t / n ** (torch.arange(dim / 2) / dim))
+        enc[1 + 2 * torch.arange(dim / 2, dtype=torch.int64, device="cuda")] = torch.cos(t / n ** (torch.arange(dim / 2, device="cuda") / dim))
+
         return enc
 
 
@@ -386,4 +393,4 @@ class UNetCIFAR10(nn.Module):
         enc[2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.sin(t / n ** (torch.arange(dim / 2) / dim))
         # cosine indices
         enc[1 + 2 * torch.arange(dim / 2, dtype=torch.int64)] = torch.cos(t / n ** (torch.arange(dim / 2) / dim))
-        return enc
+        return enc.to("cuda")

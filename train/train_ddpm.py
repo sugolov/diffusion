@@ -6,46 +6,37 @@ import torch
 from model.ddpm import DDPMnet
 from utils.utils import *
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-#dataset_train = datasets.CIFAR10('../data', train=True, download=True, transform=transforms.Compose([transforms.ToTensor()]))
-
-#training_data_loader = DataLoader(dataset_train, batch_size=64, shuffle=True)
-
-def train_cifar10(lr=2e-4, epochs=1, batch_size=64):
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+def train_ddpm_cifar10(ddpm_net, data_location, lr=2e-4, epochs=1, batch_size=128, checkpoint_steps=10):
 
     # CIFAR10 training data
-    dataset_train = datasets.CIFAR10('../data', train=True, download=True,
+    dataset_train = datasets.CIFAR10(data_location, train=True, download=True,
                                      transform=transforms.Compose([transforms.ToTensor()]))
-    training_data_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
+    training_data_loader = DataLoader(dataset_train, batch_size=int(batch_size), shuffle=True)
 
-    # noise network
-    ddpmnet = DDPMnet()
 
-    # halving tensor size
-    ddpmnet = ddpmnet.to(device)
-    ddpmnet.half()
+    # tensor device
+    ddpm_net = ddpm_net.to(device)
 
     # optimization
-    optimizer = torch.optim.Adam(ddpmnet.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(ddpm_net.parameters(), lr=lr)
     MSE = torch.nn.functional.mse_loss
 
     # training loop
-    for i in range(epochs):
-
+    for i in range(int(epochs)):
         # timestample
         timestamp(i+1)
 
         for batch, pred in training_data_loader:
 
             # sample
-            t = torch.randint(ddpmnet.n_steps, (1,)).to(device)
-            noise = torch.randn((batch.shape[0], 3, 32, 32)).to(device).half()
+            t = torch.randint(ddpm_net.n_steps, (1,)).to(device)
+            noise = torch.randn((batch.shape[0], 3, 32, 32)).to(device)
 
-            batch = batch.to(device).half()
+            batch = batch.to(device)
 
             # forward
-            noise_pred = ddpmnet(x0=batch, noise=noise, t=t)
+            noise_pred = ddpm_net(x0=batch, noise=noise, t=t)
             loss = MSE(noise_pred, noise)
 
             # backward
@@ -53,9 +44,23 @@ def train_cifar10(lr=2e-4, epochs=1, batch_size=64):
             loss.backward()
             optimizer.step()
 
+        if i % checkpoint_steps:
+            torch.save(
+                {
+                    "epoch": i,
+                    "model_state_dict": ddpm_net.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "loss": loss
+                }
+            )
+
     timestamp("end")
 
-# TODO: setup checkpointing, https://pytorch.org/tutorials/recipes/recipes/saving_and_loading_a_general_checkpoint.html
 
 if __name__ == "__main__":
-    train_cifar10(batch_size=128)
+    unet_config = load_config(name="CIFAR10_unet_config", location="../model/config")
+    ddpm_net = DDPMnet(unet_config)
+
+    #train_ddpm_cifar10(ddpm_net=ddpm_net)
+
+
