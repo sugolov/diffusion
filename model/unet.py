@@ -2,26 +2,30 @@ import torch
 import torch.nn as nn
 from torch.nn import Conv2d, ConvTranspose2d, MaxPool2d
 
-from mlp import MLP
+from model.mlp import MLP
 
 
 class ConvLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, activation=nn.SiLU(), kernel_size=2, padding="same", *args, **kwargs):
+    def __init__(self, in_channels, out_channels, activation=nn.SiLU(), num_groups=1, kernel_size=2, padding="same", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
         self.activation = activation
+        self.gn = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
     def forward(self, x):
-        return self.activation(self.conv(x))
+        x = self.conv(x)
+        x = self.gn(x)
+        x = self.activation(x)
+        return x
 
 
 class AttentionConv(nn.Module):
-    def __init__(self, out_channels, kernel_size=2, padding="same", embed_dim=32, num_heads=4, *args, **kwargs):
+    def __init__(self, out_channels, kernel_size=2, padding="same", embed_dim=64, num_heads=4, num_groups=1, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         # main convs
-        self.in_conv = ConvLayer(out_channels, 1, kernel_size=kernel_size, padding=padding)
-        self.out_conv = ConvLayer(1, out_channels, kernel_size=kernel_size, padding=padding)
+        self.in_conv = ConvLayer(out_channels, embed_dim, kernel_size=kernel_size, padding=padding, num_groups=num_groups)
+        self.out_conv = ConvLayer(embed_dim, out_channels, kernel_size=kernel_size, padding=padding, num_groups=num_groups)
 
         self.attn = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads)
 
@@ -29,16 +33,32 @@ class AttentionConv(nn.Module):
         x_in = x
         x = self.in_conv(x)
 
-        # drop the channel dim during attention computation
-        x = x[:, 0, :, :]
+        b, c, d1, d2 = x.shape
+
+        """
+        idea: attend to channels c at each pixel of d1xd2
+        """
+
+        # make shape b, c, d1*d2
+        x = torch.flatten(x, start_dim=-2)
+
+        # make shape b, d1*d2, c
+        # ie. attend to c channels at d1*d2 pixels
+        x = torch.transpose(x, dim0=-1, dim1=-2)
+
         x = self.attn(x, x, x)[0]
-        x = x[:, None, :, :]
+
+        # make shape b, c, d1*d2
+        # ie. make channels come first again
+        x = torch.transpose(x, dim0=-1, dim1=-2)
+
+        # make shape b, c, d1, d2
+        x = x.reshape((b, c, d1, d2))
 
         x = self.out_conv(x)
 
         # residual connection
         x = x + x_in
-
         return x
 
 
@@ -47,7 +67,7 @@ class UNetConvBlock(nn.Module):
                  out_channels,
                  kernel_size=2,
                  padding="same",
-                 num_groups=4,
+                 num_groups=1,
                  mlp_layers=(1024,),
                  attention=False,
                  embed_dim=16,
@@ -61,8 +81,8 @@ class UNetConvBlock(nn.Module):
         self.out_channels = out_channels
 
         # main convs
-        self.conv1 = ConvLayer(in_channels, out_channels, kernel_size=kernel_size, padding=padding)
-        self.conv2 = ConvLayer(out_channels, out_channels, kernel_size=kernel_size, padding=padding)
+        self.conv1 = ConvLayer(in_channels, out_channels, kernel_size=kernel_size, padding=padding, num_groups=num_groups)
+        self.conv2 = ConvLayer(out_channels, out_channels, kernel_size=kernel_size, padding=padding, num_groups=num_groups)
 
         # group norm
         # self.gn1 = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
@@ -72,7 +92,7 @@ class UNetConvBlock(nn.Module):
 
         if attention:
             self.attn = AttentionConv(out_channels=out_channels, kernel_size=kernel_size, embed_dim=embed_dim,
-                                      num_heads=num_heads)
+                                      num_heads=num_heads, num_groups=num_groups)
         else:
             self.attn = nn.Identity()
 
@@ -101,7 +121,7 @@ class UNetEncoderLayer(nn.Module):
                  out_channels,
                  kernel_size=2,
                  padding="same",
-                 num_groups=4,
+                 num_groups=1,
                  residual=True,
                  mlp_layers=(1024,),
                  attention=False,
@@ -128,7 +148,7 @@ class UNetEncoderLayer(nn.Module):
         else:
             self.res_conv = None
 
-        # self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
     def forward(self, x, t):
         x_in = x
@@ -137,7 +157,7 @@ class UNetEncoderLayer(nn.Module):
 
         if self.residual:
             x_res = nn.SiLU()(self.res_conv(x_in))
-            # xres = self.gn_res(xres)
+            x_res = self.gn_res(x_res)
             return x + x_res
 
         return x
@@ -151,7 +171,7 @@ class UNetDecoderLayer(nn.Module):
                  kernel_size=2,
                  upsample_size=2,
                  padding="same",
-                 num_groups=4,
+                 num_groups=1,
                  mlp_layers=(1024,),
                  attention=False,
                  num_heads=4,
@@ -166,57 +186,54 @@ class UNetDecoderLayer(nn.Module):
             out_channels,
             kernel_size=kernel_size,
             padding=padding,
+            num_groups=num_groups,
             mlp_layers=mlp_layers,
             attention=attention,
             num_heads=num_heads,
             embed_dim=embed_dim
         )
 
-        # self.gn_up = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        self.gn_up = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
-        self.up_conv = ConvTranspose2d(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=upsample_size,
-            stride=upsample_size
-        )
+        self.up_conv = ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=upsample_size, stride=upsample_size)
+        self.res_conv = Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, padding=padding)
 
-        # self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
-
-        self.res_conv = Conv2d(
-            in_channels=out_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            padding=padding
-        )
+        self.gn_up = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
+        self.gn_res = nn.GroupNorm(num_groups=num_groups, num_channels=out_channels)
 
     def forward(self, x, x_res, t):
         x = self.up_conv(x)
-        # x = self.gn_up(x)
+        x = self.gn_up(x)
         x = x + self.res_conv(x_res)
 
         x = self.conv(x, t)
-        # x = self.gn_res(x)
+        x = self.gn_res(x)
         return x
 
 
 class UNet(nn.Module):
     """
     UNet that can be set up with a single config
+
+    TODO: make layer-wise attention setup cleaner
+    TODO: make layer-wise activation and residual setup cleaner
     """
 
-    def __init__(self, layer_channels, layer_attention,
+    def __init__(self,
+                 layer_channels,
+                 layer_attention,
+                 layer_groups,
                  maxpool_size=2,
                  time_emb_dim=1024,
                  time_n=1e5,
                  kernel_size=2,
                  upsample_size=2,
                  padding="same",
-                 num_groups=4,
                  residual=True,
                  mlp_layers=None,
                  num_heads=4,
-                 embed_dim=16,
+                 embed_dim=64,
+                 out_groups=4,
                  *args, **kwargs):
         """
         Set up a UNet for DDPM with any layer config
@@ -239,7 +256,7 @@ class UNet(nn.Module):
         if mlp_layers is None:
             mlp_layers = (time_emb_dim,)
 
-        for in_channels, out_channels, attn in zip(layer_channels[:-1], layer_channels[1:], layer_attention):
+        for in_channels, out_channels, attn, num_groups in zip(layer_channels[:-1], layer_channels[1:], layer_attention, layer_groups):
             self.encoders.append(
                 UNetEncoderLayer(
                     in_channels=in_channels,
@@ -250,17 +267,18 @@ class UNet(nn.Module):
                     num_heads=num_heads,
                     embed_dim=embed_dim,
                     mlp_layers=mlp_layers,
-                    residual=True
+                    residual=residual,
+                    num_groups=num_groups
                 )
             )
 
         self.midconv = UNetConvBlock(
             in_channels=layer_channels[-1],
-            out_channels=2 * layer_channels[-1]
+            out_channels=2*layer_channels[-1]
         )
 
-        for in_channels, out_channels, attention in zip(
-                reversed(layer_channels[2:]), reversed(layer_channels[1:-1]), reversed(layer_attention)
+        for in_channels, out_channels, attention, num_groups in zip(
+                reversed(layer_channels[2:]), reversed(layer_channels[1:-1]), reversed(layer_attention), reversed(layer_groups)
         ):
             self.decoders.append(
                 UNetDecoderLayer(
@@ -272,13 +290,15 @@ class UNet(nn.Module):
                     padding=padding,
                     num_heads=num_heads,
                     embed_dim=embed_dim,
-                    mlp_layers=mlp_layers
+                    mlp_layers=mlp_layers,
+                    num_groups=num_groups
                 )
             )
 
         self.out_layer = nn.Sequential(
             UNetConvBlock(2 * layer_channels[1], layer_channels[1]),
-            nn.Conv2d(layer_channels[1], layer_channels[0], kernel_size=1)
+            nn.GroupNorm(num_channels=layer_channels[1], num_groups=out_groups),
+            nn.Conv2d(layer_channels[1], layer_channels[0], kernel_size=1),
         )
 
     def forward(self, x, t):

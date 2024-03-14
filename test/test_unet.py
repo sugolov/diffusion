@@ -45,8 +45,20 @@ def test_mlp():
 
 
 def test_attn_conv():
+    print("implementation-like transpositions")
+    tensor = torch.tensor(range(96)).reshape((2, 3, 4, 4))
+    print(tensor.shape)
+    tensor = torch.flatten(tensor, start_dim=-2)
+    print(tensor.shape)
+    tensor = torch.transpose(tensor, dim0=-1, dim1=-2)
+    print(tensor.shape)
+    tensor = torch.transpose(tensor, dim0=-1, dim1=-2)
+    print(tensor.shape)
+    tensor = tensor.reshape((2, 3, 4, 4))
+    print(tensor.shape)
+
     tensor = torch.randn((5, 3, 8, 8))
-    conv = AttentionConv(3, embed_dim=8)
+    conv = AttentionConv(3, embed_dim=8, num_groups=1)
     print(conv(tensor).shape)
 
 
@@ -65,12 +77,14 @@ def test_kwargs():
 def test_unet():
     net = UNet(
         layer_channels=[3, 8, 16, 32, 64],
-        layer_attention=[False, True, False, False]
+        layer_attention=[False, True, False, False],
+        layer_groups=(1,2,4,8)
     )
     image = net(x=torch.randn((5, 3, 32, 32)), t=4)
+    print(image.shape)
 
 
 if __name__ == "__main__":
-    test_attn_conv()
-    test_kwargs()
+    #test_attn_conv()
+    # test_kwargs()
     test_unet()
