@@ -10,9 +10,16 @@ Training a denoising diffusion probabilistic model on CIFAR10
 - PixelCNN++ https://arxiv.org/pdf/1701.05517.pdf
 
 #### Training details
+Activate venv
 ```
-TODO
+source venv/bin/activate
 ```
+Run training script
+
+```
+python train.py --cifar10 1
+```
+TODO: add weights and biases
 
 
 ## Further Steps
