@@ -15,7 +15,7 @@ def train_ddpm_cifar10(ddpm_net, data_location, lr=2e-4, epochs=1, batch_size=12
                                      transform=transforms.Compose([transforms.ToTensor()]))
     training_data_loader = DataLoader(dataset_train, batch_size=int(batch_size), shuffle=True)
 
-    run = wandb.init()
+    run = wandb.init(name="ddpm_cifar10")
 
     # tensor device
     ddpm_net = ddpm_net.to(device)
