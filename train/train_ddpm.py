@@ -2,6 +2,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 import torch
+import wandb
 
 from model.ddpm import DDPMnet
 from utils.utils import *
@@ -14,6 +15,7 @@ def train_ddpm_cifar10(ddpm_net, data_location, lr=2e-4, epochs=1, batch_size=12
                                      transform=transforms.Compose([transforms.ToTensor()]))
     training_data_loader = DataLoader(dataset_train, batch_size=int(batch_size), shuffle=True)
 
+    run = wandb.init()
 
     # tensor device
     ddpm_net = ddpm_net.to(device)
@@ -25,7 +27,7 @@ def train_ddpm_cifar10(ddpm_net, data_location, lr=2e-4, epochs=1, batch_size=12
     # training loop
     for i in range(int(epochs)):
         # timestample
-        timestamp(i+1)
+        timestamp("completed epoch " + str(i+1))
 
         for batch, pred in training_data_loader:
 
@@ -44,14 +46,22 @@ def train_ddpm_cifar10(ddpm_net, data_location, lr=2e-4, epochs=1, batch_size=12
             loss.backward()
             optimizer.step()
 
-        if i % checkpoint_steps:
+        run.log(
+            {
+                "epoch": i,
+                "loss": loss
+            }
+        )
+
+        if i % checkpoint_steps == 0:
             torch.save(
                 {
                     "epoch": i,
                     "model_state_dict": ddpm_net.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "loss": loss
-                }
+                },
+                "_".join(["out/ddpm_cifar10", str(i)])
             )
 
     timestamp("end")
@@ -60,7 +70,5 @@ def train_ddpm_cifar10(ddpm_net, data_location, lr=2e-4, epochs=1, batch_size=12
 if __name__ == "__main__":
     unet_config = load_config(name="CIFAR10_unet_config", location="../model/config")
     ddpm_net = DDPMnet(unet_config)
-
-    #train_ddpm_cifar10(ddpm_net=ddpm_net)
 
 
