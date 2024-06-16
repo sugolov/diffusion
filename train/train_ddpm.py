@@ -31,6 +31,8 @@ def train_ddpm_cifar10(ddpm_net, data_location, lr=2e-4, epochs=1, batch_size=12
 
         for batch, pred in training_data_loader:
 
+            batch /= 255
+
             # sample
             t = torch.randint(ddpm_net.n_steps, (1,)).to(device)
             noise = torch.randn((batch.shape[0], 3, 32, 32)).to(device)

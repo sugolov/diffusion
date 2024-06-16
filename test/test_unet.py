@@ -78,7 +78,7 @@ def test_unet():
     net = UNet(
         layer_channels=[3, 8, 16, 32, 64],
         layer_attention=[False, True, False, False],
-        layer_groups=(1,2,4,8)
+        layer_groups=(1,1,1,1)
     ).to("cuda")
     image = net(x=torch.randn((5, 3, 32, 32)).to("cuda"), t=4)
     print(image.shape)
