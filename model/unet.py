@@ -30,7 +30,6 @@ class AttentionConv(nn.Module):
                                  num_groups=num_groups)
         self.out_conv = ConvLayer(embed_dim, out_channels, kernel_size=kernel_size, padding=padding,
                                   num_groups=num_groups)
-
         self.attn = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads)
 
     def forward(self, x):
