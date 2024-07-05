@@ -31,7 +31,7 @@ if args.cifar10:
 
     ddpm = DDPMnet(unet_config, **train_config["ddpm"])
     # training
-    # TODO: add checkpointing loading if exists
+    
     train_ddpm_cifar10(ddpm,
                        data_location="data",
                        model_state_dict=model_state_dict,
