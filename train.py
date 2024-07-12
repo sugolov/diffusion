@@ -25,7 +25,7 @@ parser.add_argument("--cifar10", action="store_true", default=False)
 parser.add_argument("--butterfly", action="store_true", default=False)
 
 parser.add_argument("--checkpoint", action="store", type=int)
-parser.add_argument("--out", action="store", type=str)
+parser.add_argument("--out", action="store", type=str, default="out")
 
 args = parser.parse_args()
 
@@ -37,6 +37,7 @@ if args.butterfly:
     config.dataset_name = "huggan/smithsonian_butterflies_subset"
     dataset = load_dataset(config.dataset_name, split="train")
 
+    config.output_dir = args.out
 
     preprocess = transforms.Compose(
         [

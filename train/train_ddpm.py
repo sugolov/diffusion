@@ -17,15 +17,17 @@ import os
 
 import torch.nn.functional as F
 
-def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader, lr_scheduler, run_name="ddpm_cifar10"):
+def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader, lr_scheduler, checkpoint_path=None):
 
     # Initialize accelerator and tensorboard logging
     accelerator = Accelerator(
         mixed_precision=config.mixed_precision,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         log_with="wandb",
-        project_dir=os.path.join(config.output_dir, "logs"),
+        # project_dir=os.path.join(config.output_dir, "logs"),
+        project_dir=config.output_dir
     )
+
     if accelerator.is_main_process:
         if config.output_dir is not None:
             os.makedirs(config.output_dir, exist_ok=True)
@@ -33,7 +35,11 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
             repo_id = create_repo(
                 repo_id=config.hub_model_id or Path(config.output_dir).name, exist_ok=True
             ).repo_id
-        accelerator.init_trackers(run_name)
+        accelerator.init_trackers(
+            project_name="diffusion",
+            init_kwargs={"wandb": {"name": config.run_name}},
+            config=config
+        )
 
     # Prepare everything
     # There is no specific order to remember, you just need to unpack the
@@ -41,6 +47,9 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+
+    if checkpoint_path is not None:
+        accelerator.load_state(checkpoint_path)
 
     global_step = 0
 
@@ -81,6 +90,12 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
             global_step += 1
+
+        if epoch % config.save_model_epochs == 0:
+            accelerator.register_for_checkpointing(lr_scheduler)
+            accelerator.save_state()
+
+    accelerator.end_training()
 
 def train_ddpm_cifar10_old(
         ddpm_net,
