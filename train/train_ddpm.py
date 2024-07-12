@@ -1,3 +1,4 @@
+from diffusers import DDPMPipeline
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
@@ -27,6 +28,7 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
         # project_dir=os.path.join(config.output_dir, "logs"),
         project_dir=config.output_dir
     )
+
 
     if accelerator.is_main_process:
         if config.output_dir is not None:
@@ -91,9 +93,22 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
             accelerator.log(logs, step=global_step)
             global_step += 1
 
-        if epoch % config.save_model_epochs == 0:
-            accelerator.register_for_checkpointing(lr_scheduler)
-            accelerator.save_state()
+        if accelerator.is_main_process:
+
+            pipeline = DDPMPipeline(unet=accelerator.unwrap_model(model), scheduler=noise_scheduler)
+
+            if (epoch + 1) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
+
+                if config.push_to_hub:
+                    upload_folder(
+                        repo_id=config.repo_id,
+                        folder_path=config.output_dir,
+                        commit_message=f"Epoch {epoch}",
+                        ignore_patterns=["step_*", "epoch_*"],
+                    )
+
+                else:
+                    pipeline.save_pretrained(config.output_dir)
 
     accelerator.end_training()
 
