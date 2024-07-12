@@ -99,16 +99,18 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
 
             if (epoch + 1) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
 
+                out_path = os.path.join(config.output_dir, config.run_name)
+
                 if config.push_to_hub:
                     upload_folder(
                         repo_id=config.repo_id,
-                        folder_path=config.output_dir,
+                        folder_path=out_path,
                         commit_message=f"Epoch {epoch}",
                         ignore_patterns=["step_*", "epoch_*"],
                     )
 
                 else:
-                    pipeline.save_pretrained(config.output_dir)
+                    pipeline.save_pretrained(out_path)
 
     accelerator.end_training()
 
