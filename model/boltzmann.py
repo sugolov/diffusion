@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+from diffusers import Mel
 class RBM(nn.Module):
 
     def __init__(self, n_hidden, n_visible, *args, **kwargs):
