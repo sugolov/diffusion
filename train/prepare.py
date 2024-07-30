@@ -13,17 +13,16 @@ Prepare objects for training loop
 """
 def prepare(run, n_subset=None, output_dir="out"):
     # match correct run names
-    match run:
-        case "butterfly":
-            config = SmithsonianButterflyTrainingConfig()
-            model = unet_ddpm_smithsonian_butterfly(config)
-            data_key = "image"
-        case "cifar10":
-            config = CIFAR10TrainingConfig()
-            model = unet_ddpm_cifar10(config)
-            data_key = "img"
-        case _:
-            raise ValueError(f"No config for `{run}`")
+    if run == "butterfly":
+        config = SmithsonianButterflyTrainingConfig()
+        model = unet_ddpm_smithsonian_butterfly(config)
+        data_key = "image"
+    elif run == "cifar10":
+        config = CIFAR10TrainingConfig()
+        model = unet_ddpm_cifar10(config)
+        data_key = "img"
+    else:
+        raise ValueError(f"No config for `{run}`")
 
     # subset training data if needed
     config.n_subset = n_subset
