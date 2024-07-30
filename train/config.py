@@ -44,7 +44,7 @@ class CIFAR10TrainingConfig:
     learning_rate = 1e-4
     lr_warmup_steps = 500
     save_image_epochs = 10
-    save_model_epochs = 1
+    save_model_epochs = 10
     save_by_epoch = True
     # save_optimizer = save_model_epochs
 
