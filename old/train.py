@@ -2,7 +2,7 @@ import sys
 import argparse
 from utils.utils import *
 from model.ddpm import DDPMnet
-from train.train_ddpm import train_ddpm_cifar10_old
+from train.ddpm import train_ddpm_cifar10_old
 
 import torch
 

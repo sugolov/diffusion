@@ -5,7 +5,6 @@ from torch.utils.data import DataLoader
 import torch
 import wandb
 
-from model.ddpm import DDPMnet
 from utils.utils import *
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -87,7 +86,11 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
                 optimizer.zero_grad()
 
             progress_bar.update(1)
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0], "step": global_step}
+            logs = {
+                "loss": loss.detach().item(),
+                "lr": lr_scheduler.get_last_lr()[0],
+                "step": global_step
+            }
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
             global_step += 1
@@ -98,7 +101,12 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
 
             if (epoch + 1) % config.save_model_epochs == 0 or epoch == config.num_epochs - 1:
 
-                out_path = os.path.join(config.output_dir, config.run_name)
+                tag = f"-epoch-{epoch + 1}" if (epoch + 1) < config.num_epochs and config.save_by_epoch else ""
+
+                out_path = os.path.join(
+                    config.output_dir,
+                    config.run_name + tag
+                )
 
                 if config.push_to_hub:
                     upload_folder(
@@ -111,11 +119,7 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
                 else:
                     pipeline.save_pretrained(out_path)
 
+            # TODO: checkpoint with optimizer
+            # if (epoch + 1) % config.save_optimizer
+
     accelerator.end_training()
-
-
-if __name__ == "__main__":
-    unet_config = load_config(name="CIFAR10_unet_config", location="../model/config")
-    ddpm_net = DDPMnet(unet_config)
-
-
