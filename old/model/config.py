@@ -21,7 +21,7 @@ def unet_vae_lsun_churches_256(config):
         ),
     )
 
-def unet_ddpm_cifar10(config):
+def unet_cifar10(config):
     return UNet2DModel(
         sample_size=config.image_size,  # the target image resolution
         in_channels=3,  # the number of input channels, 3 for RGB images
@@ -42,7 +42,7 @@ def unet_ddpm_cifar10(config):
         ),
     )
 
-def unet_ddpm_smithsonian_butterfly(config):
+def unet_smithsonian_butterfly(config):
     return UNet2DModel(
         sample_size=config.image_size,  # the target image resolution
         in_channels=3,  # the number of input channels, 3 for RGB images
