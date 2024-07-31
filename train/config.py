@@ -39,14 +39,15 @@ class CIFAR10TrainingConfig:
     image_size = 32  # the generated image resolution
     train_batch_size = 64
     #eval_batch_size = 16  # how many images to sample during evaluation
-    num_epochs = 200
+    num_epochs = 5
     gradient_accumulation_steps = 1
     learning_rate = 1e-4
     lr_warmup_steps = 500
     save_image_epochs = 10
     save_model_epochs = 10
     save_by_epoch = True
-    # save_optimizer = save_model_epochs
+
+    save_checkpoint_steps = 2.5e4
 
     mixed_precision = "fp16"
     run_name = "ddpm-cifar10"
@@ -62,7 +63,7 @@ class CIFAR10TrainingConfig:
     ]
 
     push_to_hub = False
-    hub_model_id = "sugolov/ddpm-cifar10-unet" if n_subset is None else f"sugolov/ddpm-cifar10-unet-{n_subset}"
+    hub_model_id = f"sugolov/{run_name}"
     hub_private_repo = False
     overwrite_output_dir = True  # overwrite the old model when re-running the notebook
     seed = 0

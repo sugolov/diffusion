@@ -17,7 +17,14 @@ import os
 
 import torch.nn.functional as F
 
-def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader, lr_scheduler, checkpoint_path=None):
+def get_checkpoint_path(config, step):
+    checkpoint_path = os.path.join(
+        config.output_dir,
+        config.run_name + f"-checkpoints/checkpoint-{step}"
+    )
+    return checkpoint_path
+
+def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader, lr_scheduler, checkpoint_step=None):
 
     # Initialize accelerator and tensorboard logging
     accelerator = Accelerator(
@@ -47,13 +54,16 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
     model, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, lr_scheduler
     )
+    accelerator.register_for_checkpointing(optimizer, lr_scheduler, model)
 
-    if checkpoint_path is not None:
-        accelerator.load_state(checkpoint_path)
+    # if checkpoint step is passed, load it
+    if checkpoint_step is None:
+        global_step = 0
+    else:
+        accelerator.load_state(get_checkpoint_path(config, checkpoint_step))
+        global_step = checkpoint_step
 
-    global_step = 0
-
-    # Now you train the model
+    # training loop
     for epoch in range(config.num_epochs):
         progress_bar = tqdm(total=len(train_dataloader), disable=not accelerator.is_local_main_process)
         progress_bar.set_description(f"Epoch {epoch}")
@@ -108,18 +118,20 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
                     config.run_name + tag
                 )
 
+                pipeline.save_pretrained(out_path)
+
                 if config.push_to_hub:
                     upload_folder(
-                        repo_id=config.repo_id,
+                        repo_id=config.hub_model_id,
                         folder_path=out_path,
                         commit_message=f"Epoch {epoch}",
                         ignore_patterns=["step_*", "epoch_*"],
                     )
 
-                else:
-                    pipeline.save_pretrained(out_path)
-
-            # TODO: checkpoint with optimizer
-            # if (epoch + 1) % config.save_optimizer
+            if (global_step + 1) % config.save_checkpoint_epochs:
+                # save as end of previous global step
+                checkpoint_path = get_checkpoint_path(config, global_step)
+                accelerator.save_state(checkpoint_path)
+                print(f"Created checkpoint at step {global_step} in " + checkpoint_path)
 
     accelerator.end_training()
