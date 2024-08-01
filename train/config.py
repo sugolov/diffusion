@@ -44,10 +44,10 @@ class CIFAR10TrainingConfig:
     learning_rate = 2e-4
     lr_warmup_steps = 500
     save_image_epochs = 10
-    save_model_epochs = 10
+    save_model_epochs = 100
     save_by_epoch = True
 
-    save_checkpoint_steps = 2.5e4
+    save_checkpoint_epochs = 10
 
     mixed_precision = "fp16"
     run_name = "ddpm-cifar10"
