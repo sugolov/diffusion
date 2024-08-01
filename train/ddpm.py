@@ -128,7 +128,7 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
                         ignore_patterns=["step_*", "epoch_*"],
                     )
 
-            if (global_step + 1) % config.save_checkpoint_epochs:
+            if (global_step + 1) % config.save_checkpoint_steps:
                 # save as end of previous global step
                 checkpoint_path = get_checkpoint_path(config, global_step)
                 accelerator.save_state(checkpoint_path)
