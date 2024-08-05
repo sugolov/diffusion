@@ -69,6 +69,9 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
         progress_bar = tqdm(total=len(train_dataloader), disable=not accelerator.is_local_main_process)
         progress_bar.set_description(f"Epoch {epoch}")
 
+        # reset checkpointing every epoch
+        do_checkpoint = True
+
         for step, batch in enumerate(train_dataloader):
             clean_images = batch["images"]
             # Sample noise to add to the images
@@ -129,10 +132,11 @@ def train_loop_ddpm(config, model, noise_scheduler, optimizer, train_dataloader,
                         ignore_patterns=["step_*", "epoch_*"],
                     )
 
-            if (epoch + 1) % config.save_checkpoint_epochs:
+            if (epoch + 1) % config.save_checkpoint_epochs and do_checkpoint:
+                # turn off for this epoch
+                do_checkpoint = False
                 # save as end of previous global step
                 checkpoint_path = get_checkpoint_path(config, global_step)
                 accelerator.save_state(checkpoint_path)
                 print(f"Created checkpoint at step {global_step} in " + checkpoint_path)
-
     accelerator.end_training()
