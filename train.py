@@ -6,7 +6,7 @@ from train.ddpm import train_loop_ddpm
 parser = argparse.ArgumentParser(description="slurm training arg parser")
 parser.add_argument("--run_task", action="store", type=str)
 parser.add_argument("--out", action="store", type=str, default="out")
-parser.add_argument("--checkpoint", action="store", type=int)
+parser.add_argument("--chec kpoint", action="store", type=int)
 parser.add_argument("--n_subset", default=None, action="store", type=int)
 parser.add_argument("--scheduler",  action="store", type=str, default="constant")
 
